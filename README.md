@@ -1,4 +1,35 @@
-# Play Integrity Fork
+# Play Integrity Fork KeyStore Bypass
+This fork-fork aim is to bypass the AndroidKeyStore by implementing a similar process software side.
+The current implementation provides DEVICE through the classic PIF, while having a test environment that runs the KeyStore bypass in the KeyAttestation app.
+At the moment this repository contains:
+- Import and parsing of keybox.xml from module folder
+- Keypair and its certificate attestation generation through a simplified software implementation of AndroidKeyStore
+- Certificate chain retrieval
+
+The whole implementation provides a valid attestation to the [KeyAttestation app](https://github.com/vvb2060/KeyAttestation).
+
+*This integration is inspired by chiteroman's BootloaderSpoofer and FrameworkPatch. Parts of the certificate parsing and attestation generation are based on his work*
+
+## Lack of time to work on the module
+Due to lack of time I am unable to keep working on the implementation. I will provide some open points to expand on the work I did.
+
+### Open points
+- In order to better grasp the droidguard key requirements, an analysis of the `AlgorithmParameterSpec` provided while initializing the `CustomkeyPairGenerator` should suffice in order to understand the attestation requirements and implement the relative, half implemented and commented, spec handlers.
+- Testing could be done with a keybox.xml with associated device parameters, even if the keybox has been invalidated.
+- This implementation **has not been tested in droidguard yet**. This means that droidguard could implement checks that validate the KeyPairGenerator, as well as the KeyStoreSpi, through, for example, checking their class name. As well as other checks that could detect any of the current injection methods.
+- Remember that each test you do with a valid keybox in droidguard could be detected and result in its future invalidation. I never had the pleasure of testing droidguard with a valid keybox (even if i had multiple prior to the last ban wave) due to not having time to check out the whole `AlgorithmParameterSpec` requested by droidguard, I did only test the current implemented features with key attestation app.
+
+## Thoughs on the future
+As far as I can tell, even with a bypass working, without a reliable way to retrieve the key from the device you own (prior to RKP), this approach is and will be unsustainable in the long run, due to possible improvements in droidguard detection. 
+The already existing remote key provisioning system also limits the usage of provisioned keys to a limited time. Expanding on that, emulating the provisioning system will also required reliable extraction from the device TEE that, will be certainly done but, will never be reliable enough for a wide spread use.
+
+The key point being that google has finally found a way to kick the modding community, custom rom/unlocked bootloader users, out of its ecosystem in a consistent way.
+
+## A message to the walled garden keepers
+While I do appreciate your dedication and your ways of providing the community with working tools, the way you act shows you more as "entitled" than "helpful". That is at least in my non-existing experience because, even trying, I was unable to have a private conversation with any of you in any way. This could, and probably already is, blocking out useful contributions making this look less like a community effort and more like a personal achievement.
+
+
+# Original Play Integrity Fork README
 *PIF forked to be more futureproof and develop more methodically*
 
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/osm0sis/PlayIntegrityFork?label=Release&color=blue&style=flat)](https://github.com/osm0sis/PlayIntegrityFork/releases/latest)
@@ -66,7 +97,7 @@ If you are failing basicIntegrity (SafetyNet) or MEETS_BASIC_INTEGRITY (Play Int
 - Disable all modules except this one
 - Try a different (ideally known working) custom.pif.json
 
-Note: Some modules which modify system can trigger DroidGuard detections, as can any which hook GMS processes.
+Note: Some modules which modify system (e.g. Xposed) can trigger DroidGuard detections, as can any which hook GMS processes (e.g. custom fonts).
 
 ### Failing DEVICE verdict (on KernelSU/APatch)
 

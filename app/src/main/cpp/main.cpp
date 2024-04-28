@@ -12,6 +12,7 @@
 
 #define JSON_FILE_PATH "/data/adb/modules/playintegrityfix/pif.json"
 #define CUSTOM_JSON_FILE_PATH "/data/adb/modules/playintegrityfix/custom.pif.json"
+#define KEYBOX_FILE_PATH "/data/adb/modules/playintegrityfix/keybox.xml"
 
 static int verboseLogs = 0;
 
@@ -86,7 +87,7 @@ public:
     }
 
     void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
-        bool isGms = false, isGmsUnstable = false;
+        bool isGms = false, isGmsUnstable = false, isKeyAttestation = false;
 
         auto rawProcess = env->GetStringUTFChars(args->nice_name, nullptr);
         auto rawDir = env->GetStringUTFChars(args->app_data_dir, nullptr);
@@ -103,30 +104,37 @@ public:
 
         isGms = dir.ends_with("/com.google.android.gms");
         isGmsUnstable = process == "com.google.android.gms.unstable";
+        // TODO hex3l: remove keyattestation app from checks
+        isKeyAttestation = process == "io.github.vvb2060.keyattestation";
 
         env->ReleaseStringUTFChars(args->nice_name, rawProcess);
         env->ReleaseStringUTFChars(args->app_data_dir, rawDir);
+        // TODO hex3l: remove keyattestation app from checks
+        if (isKeyAttestation) LOGD("Found KeyAttestation APP");
+        if (!isKeyAttestation) {
+            if (!isGms) {
+                api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
+                return;
+            }
 
-        if (!isGms) {
-            api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
-            return;
-        }
+            // We are in GMS now, force unmount
+            api->setOption(zygisk::FORCE_DENYLIST_UNMOUNT);
 
-        // We are in GMS now, force unmount
-        api->setOption(zygisk::FORCE_DENYLIST_UNMOUNT);
-
-        if (!isGmsUnstable) {
-            api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
-            return;
+            if (!isGmsUnstable) {
+                api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
+                return;
+            }
         }
 
         std::vector<char> jsonVector;
-        long dexSize = 0, jsonSize = 0;
+        std::vector<char> xmlVector;
+        long dexSize = 0, jsonSize = 0, xmlSize = 0;
 
         int fd = api->connectCompanion();
 
         read(fd, &dexSize, sizeof(long));
         read(fd, &jsonSize, sizeof(long));
+        read(fd, &xmlSize, sizeof(long));
 
         if (dexSize < 1) {
             close(fd);
@@ -142,8 +150,16 @@ public:
             return;
         }
 
+        if (xmlSize < 1) {
+            close(fd);
+            LOGD("Couldn't read xml file");
+            api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
+            return;
+        }
+
         LOGD("Read from file descriptor for 'dex' -> %ld bytes", dexSize);
         LOGD("Read from file descriptor for 'json' -> %ld bytes", jsonSize);
+        LOGD("Read from file descriptor for 'xml' -> %ld bytes", xmlSize);
 
         dexVector.resize(dexSize);
         read(fd, dexVector.data(), dexSize);
@@ -151,17 +167,23 @@ public:
         jsonVector.resize(jsonSize);
         read(fd, jsonVector.data(), jsonSize);
 
+        xmlVector.resize(xmlSize);
+        read(fd, xmlVector.data(), xmlSize);
+
         close(fd);
 
         std::string jsonString(jsonVector.cbegin(), jsonVector.cend());
         json = nlohmann::json::parse(jsonString, nullptr, false, true);
+
+        std::string xmlString(xmlVector.begin(), xmlVector.end());
+        xml = xmlString;
 
         jsonVector.clear();
         jsonString.clear();
     }
 
     void postAppSpecialize(const zygisk::AppSpecializeArgs *args) override {
-        if (dexVector.empty() || json.empty()) return;
+        if (dexVector.empty() || json.empty() || xml.empty()) return;
 
         readJson();
         doHook();
@@ -169,6 +191,7 @@ public:
 
         dexVector.clear();
         json.clear();
+        xml.clear();
     }
 
     void preServerSpecialize(zygisk::ServerSpecializeArgs *args) override {
@@ -179,6 +202,7 @@ private:
     zygisk::Api *api = nullptr;
     JNIEnv *env = nullptr;
     std::vector<char> dexVector;
+    std::string xml;
     nlohmann::json json;
 
     void readJson() {
@@ -240,8 +264,13 @@ private:
 
         LOGD("JNI: Sending JSON");
         auto receiveJson = env->GetStaticMethodID(entryClass, "receiveJson", "(Ljava/lang/String;)V");
-        auto javaStr = env->NewStringUTF(json.dump().c_str());
-        env->CallStaticVoidMethod(entryClass, receiveJson, javaStr);
+        auto jsonJavaStr = env->NewStringUTF(json.dump().c_str());
+        env->CallStaticVoidMethod(entryClass, receiveJson, jsonJavaStr);
+
+        LOGD("JNI: Sending XML");
+        auto receiveXml = env->GetStaticMethodID(entryClass, "receiveXml", "(Ljava/lang/String;)V");
+        auto xmlJavaString = env->NewStringUTF(xml.c_str());
+        env->CallStaticVoidMethod(entryClass, receiveXml, xmlJavaString);
 
         LOGD("JNI: Calling init");
         auto entryInit = env->GetStaticMethodID(entryClass, "init", "(I)V");
@@ -250,8 +279,8 @@ private:
 };
 
 static void companion(int fd) {
-    long dexSize = 0, jsonSize = 0;
-    std::vector<char> dexVector, jsonVector;
+    long dexSize = 0, jsonSize = 0, xmlSize = 0;
+    std::vector<char> dexVector, jsonVector, xmlVector;
 
     FILE *dex = fopen(DEX_FILE_PATH, "rb");
 
@@ -281,11 +310,26 @@ static void companion(int fd) {
         fclose(json);
     }
 
+    FILE *xml = fopen(KEYBOX_FILE_PATH, "r");
+
+    if (xml) {
+        fseek(xml, 0, SEEK_END);
+        xmlSize = ftell(xml);
+        fseek(xml, 0, SEEK_SET);
+
+        xmlVector.resize(xmlSize);
+        fread(xmlVector.data(), 1, xmlSize, xml);
+
+        fclose(xml);
+    }
+
     write(fd, &dexSize, sizeof(long));
     write(fd, &jsonSize, sizeof(long));
+    write(fd, &xmlSize, sizeof(long));
 
     write(fd, dexVector.data(), dexSize);
     write(fd, jsonVector.data(), jsonSize);
+    write(fd, xmlVector.data(), xmlSize);
 
     dexVector.clear();
     jsonVector.clear();

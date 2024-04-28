@@ -1,5 +1,7 @@
 package es.chiteroman.playintegrityfix;
 
+import android.util.Log;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -10,11 +12,15 @@ import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 import java.util.Date;
 import java.util.Enumeration;
+import java.util.LinkedList;
 import java.util.Locale;
+import java.util.Objects;
 
 public final class CustomKeyStoreSpi extends KeyStoreSpi {
+
     public static volatile KeyStoreSpi keyStoreSpi;
 
     @Override
@@ -25,8 +31,31 @@ public final class CustomKeyStoreSpi extends KeyStoreSpi {
     @Override
     public Certificate[] engineGetCertificateChain(String alias) {
         for (StackTraceElement e : Thread.currentThread().getStackTrace()) {
-            if (e.getClassName().toLowerCase(Locale.ROOT).contains("droidguard")) {
-                EntryPoint.LOG("DroidGuard detected!");
+            // TODO hex3l: switch to droidguard, currently implemented only for key attest test app
+            if (e.getClassName().toLowerCase(Locale.ROOT).contains("vvb2060")) {
+                EntryPoint.LOG("GetChain Certificate alias requested: " + alias);
+                Certificate leaf = EntryPoint.retrieve(alias);
+                if (leaf != null) {
+                    EntryPoint.LOG("GetChain alias certificates: " + leaf.getType() + " " + leaf.hashCode() + " ");
+                    LinkedList<Certificate> certificateList = new LinkedList<>();
+
+                    try {
+                        if (((X509Certificate) leaf).getSigAlgName().contains("ECDSA")) {
+                            certificateList.addAll((Objects.requireNonNull(EntryPoint.box("ecdsa"))).certificateChain());
+                        } else {
+                            certificateList.addAll((Objects.requireNonNull(EntryPoint.box("rsa"))).certificateChain());
+                        }
+                    } catch (Throwable t) {
+                        Log.e("GetChain unable to ", t.toString());
+                    }
+                    certificateList.addFirst(leaf);
+
+                    return certificateList.toArray(new Certificate[0]);
+                }
+                throw new UnsupportedOperationException();
+            }
+            // TODO hex3l: remove fallback to device when ready to bypass keystore for droidguard
+            if(e.getClassName().toLowerCase(Locale.ROOT).contains("droidguard")) {
                 throw new UnsupportedOperationException();
             }
         }

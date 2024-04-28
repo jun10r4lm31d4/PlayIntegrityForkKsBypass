@@ -6,8 +6,13 @@ public final class CustomProvider extends Provider {
 
     CustomProvider(Provider provider) {
         super(provider.getName(), provider.getVersion(), provider.getInfo());
+        EntryPoint.LOG("Loading new provider");
         putAll(provider);
         this.put("KeyStore.AndroidKeyStore", CustomKeyStoreSpi.class.getName());
+        this.put("KeyPairGenerator.EC", CustomKeyStoreKeyPairGeneratorSpi.EC.class.getName());
+        this.put("KeyPairGenerator.RSA", CustomKeyStoreKeyPairGeneratorSpi.RSA.class.getName());
+        this.put("KeyPairGenerator.OLDEC", provider.get("KeyPairGenerator.EC"));
+        this.put("KeyPairGenerator.OLDRSA", provider.get("KeyPairGenerator.RSA"));
     }
 
     @Override

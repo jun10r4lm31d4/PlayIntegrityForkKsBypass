@@ -63,6 +63,7 @@ android {
 
 dependencies {
     implementation("dev.rikka.ndk.thirdparty:cxx:1.2.0")
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.77")
 }
 
 tasks.register("copyFiles") {
